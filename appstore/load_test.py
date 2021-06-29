@@ -66,7 +66,7 @@ class UserBehaviour(TaskSet):
         r_num = self.get_random_number(len(APPS))
         app_sid = ""
         app_name = APPS[r_num]
-        MAX_TRIES = 1000
+        MAX_TRIES = os.environ.get("MAX_TRIES", 500)
         with self.client.get(f"/start/?app_id={app_name}&cpu=0.5&memory=2G&gpu=0",
                              name="Launch the app",
                              cookies={"sessionid": self.session_id},

@@ -24,6 +24,12 @@
   
 ## Running locust
 
+- Set the following environment variables,
+```
+export MAX_TRIES=<some number>
+export HOST=<host name to test>
+```
+
 - Copy the users.txt to the current directory
 ```
 locust -f ./load_test.py
