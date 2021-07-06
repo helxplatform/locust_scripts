@@ -81,7 +81,7 @@ class UserBehaviour(TaskSet):
                 logger.debug("-- Adding app to the list failed")
         for i in range(0, int(MAX_TRIES)):
             resp = self.client.get(f"/private/{app_name}/{self.current_user}/{app_sid}/",
-                                   name="Check the status",
+                                   name=f"Check the status of instance {app_sid} launched by user {self.current_user}",
                                    cookies={"sessionid": self.session_id},
                                    )
             if resp.status_code != 200:
