@@ -79,7 +79,7 @@ class UserBehaviour(TaskSet):
                 self.app_ids.append(sid)
             else:
                 logger.debug("-- Adding app to the list failed")
-        for i in range(0, MAX_TRIES):
+        for i in range(0, int(MAX_TRIES)):
             resp = self.client.get(f"/private/{app_name}/{self.current_user}/{app_sid}/",
                                    name="Check the status",
                                    cookies={"sessionid": self.session_id},
