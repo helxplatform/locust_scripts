@@ -34,3 +34,6 @@ export HOST=<host name to test>
 ```
 locust -f ./load_test.py
 ```
+
+Web UI is available on http://127.0.0.1:8089/extend.
+Set the User spawning rate, and the Hatch rate. The Launch Times tab shows the time taken from Launch to App receiving traffic.
