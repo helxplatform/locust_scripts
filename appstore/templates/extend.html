@@ -1,0 +1,36 @@
+{% extends "index.html" %}
+
+{% block extended_tabs %}
+<li><a href="#" class="content-length-tab-link">Launch Times</a></li>
+{% endblock extended_tabs %}
+
+{% block extended_panes %}
+<div style="display:none;">
+    <table id="launch-time" class="stats">
+        <thead>
+            <tr>
+                <th class="stats_label" href="#" data-sortkey="username">User</th>
+                <th class="stats_label" href="#" data-sortkey="instance-sid">Instance SID</th>
+                <th class="stats_label numeric" href="#" data-sortkey="launch-time" title="Total launch time">Total launch time</th>
+            </tr>
+        </thead>
+        <tbody>
+        </tbody>
+    </table>
+    <p></p>
+</div>
+{% endblock extended_panes %}
+
+{% block extended_script %}
+<script type="text/javascript" src="./extend/static/extend.js"></script>
+<script type="text/x-jqote-template" id="launch-time-template">
+    <![CDATA[
+    <tr>
+        <td class="username" title="<%= this.username %>"><%= this.username %></td>
+        <td class="instance" title="<%= this.instance %>"><%= this.instance %></td>
+        <td class="numeric"><%= this.launch_time/1000|round %></td>
+    </tr>
+    <% alternate = !alternate; %>
+    ]]>
+</script>
+{% endblock extended_script %}

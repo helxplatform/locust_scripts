@@ -2,10 +2,14 @@ import logging
 import random
 import re
 import os
+import csv
 from pathlib import Path
 from bs4 import BeautifulSoup
 
+from locust import events
 from locust import HttpUser, TaskSet, SequentialTaskSet, task, between
+
+from flask import Blueprint, render_template, jsonify
 
 logger = logging.getLogger(name="LoadTestLogger")
 c_handler = logging.StreamHandler()
@@ -17,7 +21,6 @@ logger.setLevel('DEBUG')
 TEST_USERS_PATH = Path(__file__).parent.resolve(strict=True)
 
 APPS = ["jupyter-education"]
-
 USERS_CREDENTIALS = []
 
 with open(f"{TEST_USERS_PATH}/users.txt", "r") as users:
@@ -27,6 +30,7 @@ with open(f"{TEST_USERS_PATH}/users.txt", "r") as users:
 
 
 class UserBehaviour(TaskSet):
+    launch_secs = 0
 
     def __init__(self, parent):
         super().__init__(parent)
@@ -83,6 +87,7 @@ class UserBehaviour(TaskSet):
             resp = self.client.get(f"/private/{app_name}/{self.current_user}/{app_sid}/",
                                    name=f"Check the status of instance {app_sid} launched by user {self.current_user}",
                                    cookies={"sessionid": self.session_id},
+                                   context={"app_sid": app_sid, "current_user": self.current_user}
                                    )
             if resp.status_code != 200:
                 continue
@@ -132,3 +137,51 @@ class WebUser(HttpUser):
     tasks = [UserBehaviour]
     wait_time = between(2, 5)
     host = os.environ.get("HOST_NAME")
+
+
+launch_times = {}
+extend = Blueprint(
+    "extend",
+    "extend_web_ui",
+    static_folder=f"{TEST_USERS_PATH}/static/",
+    static_url_path="/extend/static/",
+    template_folder=f"{TEST_USERS_PATH}/templates/",
+)
+
+
+@events.init.add_listener
+def on_locust_init(environment, **kwargs):
+
+    if environment.web_ui:
+        @extend.route("/launch-times")
+        def total_content_length():
+            report = {"stats": []}
+            if launch_times:
+                stats_tmp = []
+
+                for username, instances in launch_times.items():
+                    for instance, launch_time in instances.items():
+
+                        stats_tmp.append(
+                            {"username": username, "instance": instance, "launch_time": launch_time}
+                        )
+                    report = {"stats": stats_tmp}
+                return jsonify(report)
+            return jsonify(launch_times)
+
+        @extend.route("/extend")
+        def instance_statistics():
+            environment.web_ui.update_template_args()
+            return render_template("extend.html", **environment.web_ui.template_args)
+        environment.web_ui.app.register_blueprint(extend)
+
+
+@events.request.add_listener
+def on_request(request_type, name, response_time, response_length, exception, context, **kwargs):
+    if "app_sid" in context.keys():
+        app_sid = context["app_sid"]
+        if "current_user" in context.keys():
+            current_user = context["current_user"]
+            launch_times.setdefault(current_user, {}).setdefault(app_sid, 0)
+            launch_times[current_user][app_sid] += response_time
+
