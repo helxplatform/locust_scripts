@@ -23,6 +23,10 @@ TEST_USERS_PATH = Path(__file__).parent.resolve(strict=True)
 APPS = ["jupyter-education"]
 USERS_CREDENTIALS = []
 
+ACTIVE_INSTANCES_COUNT = 0
+MAX_INSTANCES = os.environ.get("MAX_INSTANCES", 500)
+INSTANCES_LIVE = 0
+
 with open(f"{TEST_USERS_PATH}/users.txt", "r") as users:
     for user in users.readlines():
         username, password, email = user.split(",")
@@ -67,33 +71,39 @@ class UserBehaviour(TaskSet):
 
     @task
     def launch_apps(self):
+        global MAX_INSTANCES
+        global ACTIVE_INSTANCES_COUNT
+        global INSTANCES_LIVE
         r_num = self.get_random_number(len(APPS))
         app_sid = ""
         app_name = APPS[r_num]
         MAX_TRIES = os.environ.get("MAX_TRIES", 500)
-        with self.client.get(f"/start/?app_id={app_name}&cpu=0.5&memory=2G&gpu=0",
-                             name="Launch the app",
-                             cookies={"sessionid": self.session_id},
-                             catch_response=True) as resp:
-            logger.debug(f"-- Successfully launched an instance by user {self.current_user}")
-            sid_match = re.search("/[0-9,a-z,A-Z]{32}/", resp.text)
-            if sid_match:
-                sid = sid_match.group().split("/")[1]
-                app_sid = sid
-                self.app_ids.append(sid)
-            else:
-                logger.debug("-- Adding app to the list failed")
-        for i in range(0, int(MAX_TRIES)):
-            resp = self.client.get(f"/private/{app_name}/{self.current_user}/{app_sid}/",
-                                   name=f"Check the status of instance {app_sid} launched by user {self.current_user}",
-                                   cookies={"sessionid": self.session_id},
-                                   context={"app_sid": app_sid, "current_user": self.current_user}
-                                   )
-            if resp.status_code != 200:
-                continue
-            else:
-                logger.debug("-- App is receiving traffic")
-                break
+        if ACTIVE_INSTANCES_COUNT < int(MAX_INSTANCES):
+            with self.client.get(f"/start/?app_id={app_name}&cpu=0.5&memory=2G&gpu=0",
+                                 name="Launch the app",
+                                 cookies={"sessionid": self.session_id},
+                                 catch_response=True) as resp:
+                logger.debug(f"-- Successfully launched an instance by user {self.current_user} -- No of ACTIVE instances {INSTANCES_LIVE}")
+                sid_match = re.search("/[0-9,a-z,A-Z]{32}/", resp.text)
+                if sid_match:
+                    sid = sid_match.group().split("/")[1]
+                    app_sid = sid
+                    self.app_ids.append(sid)
+                else:
+                    logger.debug("-- Adding app to the list failed")
+            for i in range(0, int(MAX_TRIES)):
+                resp = self.client.get(f"/private/{app_name}/{self.current_user}/{app_sid}/",
+                                       name=f"Check the status of instance {app_sid} launched by user {self.current_user}",
+                                       cookies={"sessionid": self.session_id},
+                                       context={"app_sid": app_sid, "current_user": self.current_user}
+                                       )
+                if resp.status_code != 200:
+                    continue
+                else:
+                    logger.debug("-- App is receiving traffic")
+                    break
+        else:
+            logger.debug(f"Successfully launched all the instances. LIVE COUNT {INSTANCES_LIVE}")
 
     @task
     def get_apps(self):
