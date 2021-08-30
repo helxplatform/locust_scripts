@@ -5,11 +5,12 @@ import os
 import csv
 from pathlib import Path
 from bs4 import BeautifulSoup
+from time import time
 
 from locust import events
 from locust import HttpUser, TaskSet, SequentialTaskSet, task, between
 
-from flask import Blueprint, render_template, jsonify
+from flask import Blueprint, render_template, jsonify, make_response
 
 logger = logging.getLogger(name="LoadTestLogger")
 c_handler = logging.StreamHandler()
@@ -184,6 +185,33 @@ def on_locust_init(environment, **kwargs):
             environment.web_ui.update_template_args()
             return render_template("extend.html", **environment.web_ui.template_args)
         environment.web_ui.app.register_blueprint(extend)
+
+        @extend.route("/launch-times/csv")
+        def request_launch_times_csv():
+            response = make_response(launch_times_csv())
+            file_name = f"launch_times{time()}.csv"
+            disposition = f"attachment;filename={file_name}"
+            response.headers["Content-type"] = "text/csv"
+            response.headers["Content-disposition"] = disposition
+            return response
+
+        def launch_times_csv():
+            """Returns launch times as CSV"""
+            rows = [
+                ",".join(
+                    [
+                        '"Username"',
+                        '"Instance"',
+                        '"Launch Times"',
+                        ]
+                )
+            ]
+
+            if launch_times:
+                for username, instance, times in launch_times.items():
+                    rows.append(f"{username, instance, launch_times}")
+
+            return "/n".join(rows)
 
 
 @events.request.add_listener
