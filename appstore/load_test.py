@@ -2,13 +2,12 @@ import logging
 import random
 import re
 import os
-import csv
 from pathlib import Path
 from bs4 import BeautifulSoup
 from time import time
 
 from locust import events
-from locust import HttpUser, TaskSet, SequentialTaskSet, task, between
+from locust import HttpUser, TaskSet, task, between
 
 from flask import Blueprint, render_template, jsonify, make_response
 
@@ -222,4 +221,3 @@ def on_request(request_type, name, response_time, response_length, exception, co
             current_user = context["current_user"]
             launch_times.setdefault(current_user, {}).setdefault(app_sid, 0)
             launch_times[current_user][app_sid] += response_time
-
