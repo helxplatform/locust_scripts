@@ -3,6 +3,7 @@ import random
 import re
 import os
 import csv
+import json
 from pathlib import Path
 from bs4 import BeautifulSoup
 from time import time
@@ -22,6 +23,7 @@ logger.setLevel('DEBUG')
 TEST_USERS_PATH = Path(__file__).parent.resolve(strict=True)
 
 APPS = ["jupyter-education"]
+JUPYTER_APPS = ["jupyter-education", "jupyter-ds"]
 USERS_CREDENTIALS = []
 
 ACTIVE_INSTANCES_COUNT = 0
@@ -75,15 +77,22 @@ class UserBehaviour(TaskSet):
         global MAX_INSTANCES
         global ACTIVE_INSTANCES_COUNT
         global INSTANCES_LIVE
+
         r_num = self.get_random_number(len(APPS))
         app_sid = ""
         app_name = APPS[r_num]
+
         MAX_TRIES = os.environ.get("MAX_TRIES", 500)
+
+        x_srf_token = None
+
         if ACTIVE_INSTANCES_COUNT < int(MAX_INSTANCES):
-            with self.client.get(f"/start/?app_id={app_name}&cpu=0.5&memory=2G&gpu=0",
+            with self.client.post(f"/api/v1/instances/",
                                  name="Launch the app",
-                                 cookies={"sessionid": self.session_id},
-                                 catch_response=True) as resp:
+                                 headers={"X-CSRFToken": self.csrf_token},
+                                 cookies={"sessionid": self.session_id, "csrftoken": self.csrf_token},
+                                 catch_response=True,
+                                 data={"app_id": f"{app_name}", "cpus": 0.5, "gpus": None, "memory": "2G"}) as resp:
                 logger.debug(f"-- Successfully launched an instance by user {self.current_user} -- No of ACTIVE instances {INSTANCES_LIVE}")
                 sid_match = re.search("/[0-9,a-z,A-Z]{32}/", resp.text)
                 if sid_match:
@@ -92,6 +101,7 @@ class UserBehaviour(TaskSet):
                     self.app_ids.append(sid)
                 else:
                     logger.debug("-- Adding app to the list failed")
+
             for i in range(0, int(MAX_TRIES)):
                 resp = self.client.get(f"/private/{app_name}/{self.current_user}/{app_sid}/",
                                        name=f"Check the status of instance {app_sid} launched by user {self.current_user}",
@@ -102,33 +112,47 @@ class UserBehaviour(TaskSet):
                     continue
                 else:
                     logger.debug("-- App is receiving traffic")
+                    cookies = resp.cookies._cookies
+                    xsrf_cookie_object = cookies[os.environ.get("HOST_NAME")]['/']['_xsrf']
+                    x_srf_token = xsrf_cookie_object.value
                     break
+
+            if app_name in JUPYTER_APPS:
+                for i in range(0, 31):
+                    with self.client.post(f"/private/{app_name}/{self.current_user}/{app_sid}/api/contents/work",
+                                          name=f"Creating notebooks for instance {app_sid}",
+                                          cookies={"sessionid": self.session_id, "csrftoken": self.csrf_token},
+                                          headers={"X-CSRFToken": x_srf_token},
+                                          catch_response=True) as resp:
+                        if resp.status_code == 201:
+                            logger.debug(f"Created test notebook {i} on instance {app_sid}")
+                            continue
+                        else:
+                            logger.debug(f"test notebook {i} creation on instance {app_sid} failed.")
         else:
             logger.debug(f"Successfully launched all the instances. LIVE COUNT {INSTANCES_LIVE}")
 
     @task
     def get_apps(self):
-        with self.client.get("/apps", name="Get the apps", cookies={"sessionid": self.session_id},
+        with self.client.get("/api/v1/instances/",
+                             name="Get the apps",
+                             headers={"X-CSRFToken": self.csrf_token},
+                             cookies={"sessionid": self.session_id, "csrftoken": self.csrf_token},
                              catch_response=True) as resp:
-            content = resp.content
-            soup = BeautifulSoup(content, "html.parser")
-            apps_table = soup.find("tbody")
-            apps_list = apps_table.find_all("tr")
+            apps_list = json.loads(resp.text)
             if len(apps_list) > 0:
-                for row in apps_table.find_all("tr"):
-                    app_id = row.button['id']
-                    if app_id not in self.app_ids:
-                        self.app_ids.append(app_id)
-                    # connect_url = row.a['href']
+                for app in apps_list:
+                    app_id = app["sid"]
+                    self.app_ids.append(app_id)
         logger.debug(f"-- User {self.current_user} has {len(self.app_ids)} active -- {self.app_ids}")
 
-    @task(5)
+    @task
     def delete_apps(self):
         if len(self.app_ids) > 0:
             r_num = self.get_random_number(len(self.app_ids))
             app_id = self.app_ids[r_num]
             with self.client.post(
-                    "/list_pods/",
+                    f"/list_pods/",
                     name="Delete the app",
                     headers={"X-CSRFToken": self.csrf_token},
                     cookies={"sessionid": self.session_id, "csrftoken": self.csrf_token},
