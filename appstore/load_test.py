@@ -2,10 +2,8 @@ import logging
 import random
 import re
 import os
-import csv
 import json
 from pathlib import Path
-from bs4 import BeautifulSoup
 from time import time
 
 from locust import events
@@ -20,23 +18,23 @@ c_handler.setFormatter(c_format)
 logger.addHandler(c_handler)
 logger.setLevel('DEBUG')
 
-TEST_USERS_PATH = Path(__file__).parent.resolve(strict=True)
+test_users_path = Path(__file__).parent.resolve(strict=True)
 
-APPS = ["jupyter-education"]
-JUPYTER_APPS = ["jupyter-education", "jupyter-ds"]
-USERS_CREDENTIALS = []
+apps = ["jupyter-education"]
+jupyter_apps = ["jupyter-education", "jupyter-ds"]
+users_credentials = []
 
-ACTIVE_INSTANCES_COUNT = 0
-MAX_INSTANCES = os.environ.get("MAX_INSTANCES", 500)
-INSTANCES_LIVE = 0
+active_instances_count = 0
+max_instances = os.environ.get("MAX_INSTANCES", 500)
+instances_live = 0
 
 host_under_test = os.environ.get("HOST_NAME")
 host_name = host_under_test.split("/")[2]
 
-with open(f"{TEST_USERS_PATH}/users.txt", "r") as users:
+with open(f"{test_users_path}/users.txt", "r") as users:
     for user in users.readlines():
         username, password, email = user.split(",")
-        USERS_CREDENTIALS.append((username, password))
+        users_credentials.append((username, password))
 
 
 class UserBehaviour(TaskSet):
@@ -56,46 +54,44 @@ class UserBehaviour(TaskSet):
 
     def on_start(self):
         resp = self.client.get("/apps", name="Get csrf token")
-        if len(USERS_CREDENTIALS) > 0:
-            r_num = self.get_random_number(len(USERS_CREDENTIALS))
-            username, password = USERS_CREDENTIALS[r_num]
+        if len(users_credentials) > 0:
+            r_num = self.get_random_number(len(users_credentials))
+            u_name, pw = users_credentials[r_num]
             self.current_user = username
         else:
             logger.debug("-- No new user available")
         self.csrf_token = resp.cookies['csrftoken']
-        logger.debug(f"-- Got CSRFToken for user {username}.")
         with self.client.post(
                 "/accounts/login/?next=/apps/",
                 name="Login",
-                data={"csrfmiddlewaretoken": self.csrf_token, "login": f"{username}", "password": f"{password}"},
+                data={"csrfmiddlewaretoken": self.csrf_token, "login": f"{u_name}", "password": f"{pw}"},
                 catch_response=True
         ) as resp:
             if "sessionid" in resp.cookies.keys():
                 self.session_id = resp.cookies["sessionid"]
-                logger.debug(f"-- Got SessionID for user {username}.")
             else:
                 logger.debug(f"-- Login for user {username} failed")
 
     @task
     def launch_apps(self):
-        global MAX_INSTANCES
-        global ACTIVE_INSTANCES_COUNT
-        global INSTANCES_LIVE
+        global max_instances
+        global active_instances_count
+        global instances_live
 
-        r_num = self.get_random_number(len(APPS))
+        r_num = self.get_random_number(len(apps))
         app_sid = None
-        app_name = APPS[r_num]
+        app_name = apps[r_num]
 
-        MAX_TRIES = os.environ.get("MAX_TRIES", 500)
+        max_tries = os.environ.get("MAX_TRIES", 500)
 
-        if ACTIVE_INSTANCES_COUNT < int(MAX_INSTANCES):
+        if active_instances_count < int(max_instances):
             with self.client.post(f"/api/v1/instances/",
-                                 name="Launch the app",
-                                 headers={"X-CSRFToken": self.csrf_token},
-                                 cookies={"sessionid": self.session_id, "csrftoken": self.csrf_token},
-                                 catch_response=True,
-                                 data={"app_id": f"{app_name}", "cpus": 0.5, "gpus": None, "memory": "2G"}) as resp:
-                logger.debug(f"-- Successfully launched an instance by user {self.current_user} -- No of ACTIVE instances {INSTANCES_LIVE}")
+                                  name="Launch the app",
+                                  headers={"X-CSRFToken": self.csrf_token},
+                                  cookies={"sessionid": self.session_id, "csrftoken": self.csrf_token},
+                                  catch_response=True,
+                                  data={"app_id": f"{app_name}", "cpus": 0.5, "gpus": None, "memory": "2G"}) as resp:
+                logger.debug(f"-- Successfully launched an instance by user {self.current_user} -- No of ACTIVE instances {instances_live}")
                 sid_match = re.search("/[0-9,a-z,A-Z]{32}/", resp.text)
                 if sid_match:
                     sid = sid_match.group().split("/")[1]
@@ -105,7 +101,7 @@ class UserBehaviour(TaskSet):
                 else:
                     logger.debug("-- Adding app to the list failed")
 
-            for i in range(0, int(MAX_TRIES)):
+            for i in range(0, int(max_tries)):
                 with self.client.get(f"/private/{app_name}/{self.current_user}/{app_sid}/",
                                        name=f"Check the status of instance {app_sid} launched by user {self.current_user}",
                                        cookies={"sessionid": self.session_id},
@@ -123,7 +119,7 @@ class UserBehaviour(TaskSet):
                             self.x_srf_token = x_srf_token
                         break
 
-            if app_name in JUPYTER_APPS:
+            if app_name in jupyter_apps:
                 for i in range(0, 31):
                     with self.client.post(f"/private/{app_name}/{self.current_user}/{app_sid}/api/contents/work",
                                           name=f"Creating notebooks for instance {app_sid}",
@@ -136,7 +132,7 @@ class UserBehaviour(TaskSet):
                         else:
                             logger.debug(f"test notebook {i} creation on instance {app_sid} failed.")
         else:
-            logger.debug(f"Successfully launched all the instances. LIVE COUNT {INSTANCES_LIVE}")
+            logger.debug(f"Successfully launched all the instances. LIVE COUNT {instances_live}")
 
     @task
     def get_apps(self):
@@ -185,9 +181,9 @@ launch_times = {}
 extend = Blueprint(
     "extend",
     "extend_web_ui",
-    static_folder=f"{TEST_USERS_PATH}/static/",
+    static_folder=f"{test_users_path}/static/",
     static_url_path="/extend/static/",
-    template_folder=f"{TEST_USERS_PATH}/templates/",
+    template_folder=f"{test_users_path}/templates/",
 )
 
 
