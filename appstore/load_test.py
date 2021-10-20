@@ -57,7 +57,7 @@ class UserBehaviour(TaskSet):
         if len(users_credentials) > 0:
             r_num = self.get_random_number(len(users_credentials))
             u_name, pw = users_credentials[r_num]
-            self.current_user = username
+            self.current_user = u_name
         else:
             logger.debug("-- No new user available")
         self.csrf_token = resp.cookies['csrftoken']
@@ -131,6 +131,19 @@ class UserBehaviour(TaskSet):
                             continue
                         else:
                             logger.debug(f"test notebook {i} creation on instance {app_sid} failed.")
+            if app_name in jupyter_apps:
+                for i in range(1, 31):
+                    with self.client.patch(f"/private/{app_name}/{self.current_user}/{app_sid}/api/contents/work/untitled{i}",
+                                          json={"path": f"work/{app_sid}-{self.current_user}-{i}.ipynb"},
+                                          name=f"Renaming notebooks for instance {app_sid}",
+                                          cookies={"sessionid": self.session_id, "csrftoken": self.csrf_token},
+                                          headers={"X-CSRFToken": self.x_srf_token},
+                                          catch_response=True) as resp:
+                        if resp.status_code == 201:
+                            logger.debug(f"Renaming test notebook {i} on instance {app_sid}")
+                            continue
+                        else:
+                            logger.debug(f"test notebook {i} renaming on instance {app_sid} failed.")
         else:
             logger.debug(f"Successfully launched all the instances. LIVE COUNT {instances_live}")
 
@@ -149,22 +162,22 @@ class UserBehaviour(TaskSet):
                     self.app_ids.append(f"{app_id}")
         logger.debug(f"-- User {self.current_user} has {len(self.app_ids)} active -- {self.app_ids}")
 
-    @task(5)
-    def delete_apps(self):
-        if len(self.app_ids) > 0:
-            r_num = self.get_random_number(len(self.app_ids))
-            app_id = self.app_ids[r_num]
-            with self.client.delete(
-                    f"/api/v1/instances/{app_id}/",
-                    name="Delete the app",
-                    headers={"X-CSRFToken": self.csrf_token},
-                    cookies={"sessionid": self.session_id, "csrftoken": self.csrf_token},
-                    data={"id": f"{app_id}", "action": "delete"},
-                    catch_response=True) as resp:
-                logger.debug(f"-- App with id {app_id} has been delete by user {self.current_user}")
-                self.app_ids.remove(app_id)
-        else:
-            logger.debug(f"-- No currently active applications for user {self.current_user}.")
+#    @task(5)
+#    def delete_apps(self):
+#        if len(self.app_ids) > 0:
+#            r_num = self.get_random_number(len(self.app_ids))
+#            app_id = self.app_ids[r_num]
+#            with self.client.delete(
+#                    f"/api/v1/instances/{app_id}/",
+#                    name="Delete the app",
+#                    headers={"X-CSRFToken": self.csrf_token},
+#                    cookies={"sessionid": self.session_id, "csrftoken": self.csrf_token},
+#                    data={"id": f"{app_id}", "action": "delete"},
+#                    catch_response=True) as resp:
+#                logger.debug(f"-- App with id {app_id} has been delete by user {self.current_user}")
+#                self.app_ids.remove(app_id)
+#        else:
+#            logger.debug(f"-- No currently active applications for user {self.current_user}.")
 
     def on_stop(self):
         self.client.cookies.clear()
