@@ -38,6 +38,7 @@ This folder contains scripts for running [Locust](https://locust.io/) load tests
       export MAX_TRIES=<some number>
       export HOST_NAME=https://<some helx instance>
       export MAX_INSTANCES=<some number>
+      export NOTEBOOKS_COUNT=<some number>
 
 - Copy the users.txt to the current directory
 

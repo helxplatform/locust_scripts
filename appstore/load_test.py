@@ -84,6 +84,8 @@ class UserBehaviour(TaskSet):
 
         max_tries = os.environ.get("MAX_TRIES", 500)
 
+        no_of_notebooks = os.environ.get("NOTEBOOKS_COUNT", 30)
+
         if active_instances_count < int(max_instances):
             with self.client.post(f"/api/v1/instances/",
                                   name="Launch the app",
@@ -120,7 +122,7 @@ class UserBehaviour(TaskSet):
                         break
 
             if app_name in jupyter_apps:
-                for i in range(0, 31):
+                for i in range(0, no_of_notebooks + 1):
                     with self.client.post(f"/private/{app_name}/{self.current_user}/{app_sid}/api/contents/work",
                                           name=f"Creating notebooks for instance {app_sid}",
                                           cookies={"sessionid": self.session_id, "csrftoken": self.csrf_token},
@@ -131,9 +133,14 @@ class UserBehaviour(TaskSet):
                             continue
                         else:
                             logger.debug(f"test notebook {i} creation on instance {app_sid} failed.")
+
             if app_name in jupyter_apps:
-                for i in range(1, 31):
-                    with self.client.patch(f"/private/{app_name}/{self.current_user}/{app_sid}/api/contents/work/untitled{i}",
+                for i in range(0, no_of_notebooks + 1):
+                    if i == 0:
+                        notebook = "untitled"
+                    else:
+                        notebook = f"untitled{i}"
+                    with self.client.patch(f"/private/{app_name}/{self.current_user}/{app_sid}/api/contents/work/{notebook}",
                                           json={"path": f"work/{app_sid}-{self.current_user}-{i}.ipynb"},
                                           name=f"Renaming notebooks for instance {app_sid}",
                                           cookies={"sessionid": self.session_id, "csrftoken": self.csrf_token},
