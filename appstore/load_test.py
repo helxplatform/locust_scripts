@@ -2,8 +2,8 @@ import logging
 import random
 import re
 import os
+import json
 from pathlib import Path
-from bs4 import BeautifulSoup
 from time import time
 
 from locust import events
@@ -18,19 +18,23 @@ c_handler.setFormatter(c_format)
 logger.addHandler(c_handler)
 logger.setLevel('DEBUG')
 
-TEST_USERS_PATH = Path(__file__).parent.resolve(strict=True)
+test_users_path = Path(__file__).parent.resolve(strict=True)
 
-APPS = ["jupyter-education"]
-USERS_CREDENTIALS = []
+apps = ["jupyter-education"]
+jupyter_apps = ["jupyter-education", "jupyter-ds"]
+users_credentials = []
 
-ACTIVE_INSTANCES_COUNT = 0
-MAX_INSTANCES = os.environ.get("MAX_INSTANCES", 500)
-INSTANCES_LIVE = 0
+active_instances_count = 0
+max_instances = os.environ.get("MAX_INSTANCES", 500)
+instances_live = 0
 
-with open(f"{TEST_USERS_PATH}/users.txt", "r") as users:
+host_under_test = os.environ.get("HOST_NAME")
+host_name = host_under_test.split("/")[2]
+
+with open(f"{test_users_path}/users.txt", "r") as users:
     for user in users.readlines():
         username, password, email = user.split(",")
-        USERS_CREDENTIALS.append((username, password))
+        users_credentials.append((username, password))
 
 
 class UserBehaviour(TaskSet):
@@ -41,6 +45,7 @@ class UserBehaviour(TaskSet):
         self.current_user = ""
         self.session_id = ""
         self.csrf_token = ""
+        self.x_srf_token = ""
         self.app_ids = []
 
     def get_random_number(self, number):
@@ -49,76 +54,119 @@ class UserBehaviour(TaskSet):
 
     def on_start(self):
         resp = self.client.get("/apps", name="Get csrf token")
-        if len(USERS_CREDENTIALS) > 0:
-            r_num = self.get_random_number(len(USERS_CREDENTIALS))
-            username, password = USERS_CREDENTIALS[r_num]
-            self.current_user = username
+        if len(users_credentials) > 0:
+            r_num = self.get_random_number(len(users_credentials))
+            u_name, pw = users_credentials[r_num]
+            self.current_user = u_name
         else:
             logger.debug("-- No new user available")
         self.csrf_token = resp.cookies['csrftoken']
-        logger.debug(f"-- Got CSRFToken for user {username}.")
         with self.client.post(
                 "/accounts/login/?next=/apps/",
                 name="Login",
-                data={"csrfmiddlewaretoken": self.csrf_token, "login": f"{username}", "password": f"{password}"},
+                data={"csrfmiddlewaretoken": self.csrf_token, "login": f"{u_name}", "password": f"{pw}"},
                 catch_response=True
         ) as resp:
             if "sessionid" in resp.cookies.keys():
                 self.session_id = resp.cookies["sessionid"]
-                logger.debug(f"-- Got SessionID for user {username}.")
             else:
                 logger.debug(f"-- Login for user {username} failed")
 
     @task
     def launch_apps(self):
-        global MAX_INSTANCES
-        global ACTIVE_INSTANCES_COUNT
-        global INSTANCES_LIVE
-        r_num = self.get_random_number(len(APPS))
-        app_sid = ""
-        app_name = APPS[r_num]
-        MAX_TRIES = os.environ.get("MAX_TRIES", 500)
-        if ACTIVE_INSTANCES_COUNT < int(MAX_INSTANCES):
-            with self.client.get(f"/start/?app_id={app_name}&cpu=0.5&memory=2G&gpu=0",
-                                 name="Launch the app",
-                                 cookies={"sessionid": self.session_id},
-                                 catch_response=True) as resp:
-                logger.debug(f"-- Successfully launched an instance by user {self.current_user} -- No of ACTIVE instances {INSTANCES_LIVE}")
+        global max_instances
+        global active_instances_count
+        global instances_live
+
+        r_num = self.get_random_number(len(apps))
+        app_sid = None
+        app_name = apps[r_num]
+
+        max_tries = os.environ.get("MAX_TRIES", 500)
+
+        no_of_notebooks = int(os.environ.get("NOTEBOOKS_COUNT", 30))
+
+        if active_instances_count < int(max_instances):
+            with self.client.post(f"/api/v1/instances/",
+                                  name="Launch the app",
+                                  headers={"X-CSRFToken": self.csrf_token},
+                                  cookies={"sessionid": self.session_id, "csrftoken": self.csrf_token},
+                                  catch_response=True,
+                                  data={"app_id": f"{app_name}", "cpus": 0.5, "gpus": None, "memory": "2G"}) as resp:
+                logger.debug(f"-- Successfully launched an instance by user {self.current_user} -- No of ACTIVE instances {instances_live}")
                 sid_match = re.search("/[0-9,a-z,A-Z]{32}/", resp.text)
                 if sid_match:
                     sid = sid_match.group().split("/")[1]
                     app_sid = sid
-                    self.app_ids.append(sid)
+                    self.app_ids.append(f"{sid}")
+                    logger.debug(f"-- App with app sid {sid} added to the list for user {self.current_user}")
                 else:
                     logger.debug("-- Adding app to the list failed")
-            for i in range(0, int(MAX_TRIES)):
-                resp = self.client.get(f"/private/{app_name}/{self.current_user}/{app_sid}/",
+
+            for i in range(0, int(max_tries)):
+                with self.client.get(f"/private/{app_name}/{self.current_user}/{app_sid}/",
                                        name=f"Check the status of instance {app_sid} launched by user {self.current_user}",
                                        cookies={"sessionid": self.session_id},
                                        context={"app_sid": app_sid, "current_user": self.current_user}
-                                       )
-                if resp.status_code != 200:
-                    continue
-                else:
-                    logger.debug("-- App is receiving traffic")
-                    break
+                                       ) as resp:
+                    if resp.status_code != 200:
+                        logger.debug(f"In app status")
+                        continue
+                    else:
+                        logger.debug(f"-- App is receiving traffic")
+                        cookies = resp.cookies._cookies
+                        if cookies:
+                            xsrf_cookie_object = cookies[host_name]['/']['_xsrf']
+                            x_srf_token = xsrf_cookie_object.value
+                            self.x_srf_token = x_srf_token
+                        break
+
+            if app_name in jupyter_apps:
+                for i in range(0, no_of_notebooks + 1):
+                    with self.client.post(f"/private/{app_name}/{self.current_user}/{app_sid}/api/contents/work",
+                                          name=f"Creating notebooks for instance {app_sid}",
+                                          cookies={"sessionid": self.session_id, "csrftoken": self.csrf_token},
+                                          headers={"X-CSRFToken": self.x_srf_token},
+                                          catch_response=True) as resp:
+                        if resp.status_code == 201:
+                            logger.debug(f"Created test notebook {i} on instance {app_sid}")
+                            continue
+                        else:
+                            logger.debug(f"test notebook {i} creation on instance {app_sid} failed.")
+
+            if app_name in jupyter_apps:
+                for i in range(0, no_of_notebooks + 1):
+                    if i == 0:
+                        notebook = "untitled"
+                    else:
+                        notebook = f"untitled{i}"
+                    with self.client.patch(f"/private/{app_name}/{self.current_user}/{app_sid}/api/contents/work/{notebook}",
+                                          json={"path": f"work/{app_sid}-{self.current_user}-{i}.ipynb"},
+                                          name=f"Renaming notebooks for instance {app_sid}",
+                                          cookies={"sessionid": self.session_id, "csrftoken": self.csrf_token},
+                                          headers={"X-CSRFToken": self.x_srf_token},
+                                          catch_response=True) as resp:
+                        if resp.status_code == 201:
+                            logger.debug(f"Renaming test notebook {i} on instance {app_sid}")
+                            continue
+                        else:
+                            logger.debug(f"test notebook {i} renaming on instance {app_sid} failed.")
         else:
-            logger.debug(f"Successfully launched all the instances. LIVE COUNT {INSTANCES_LIVE}")
+            logger.debug(f"Successfully launched all the instances. LIVE COUNT {instances_live}")
 
     @task
     def get_apps(self):
-        with self.client.get("/apps", name="Get the apps", cookies={"sessionid": self.session_id},
+        with self.client.get("/api/v1/instances/",
+                             name="Get the apps",
+                             headers={"X-CSRFToken": self.csrf_token},
+                             cookies={"sessionid": self.session_id, "csrftoken": self.csrf_token},
                              catch_response=True) as resp:
-            content = resp.content
-            soup = BeautifulSoup(content, "html.parser")
-            apps_table = soup.find("tbody")
-            apps_list = apps_table.find_all("tr")
+            apps_list = json.loads(resp.text)
             if len(apps_list) > 0:
-                for row in apps_table.find_all("tr"):
-                    app_id = row.button['id']
-                    if app_id not in self.app_ids:
-                        self.app_ids.append(app_id)
-                    # connect_url = row.a['href']
+                for app in apps_list:
+                    logger.debug(f"-- App {app}")
+                    app_id = app["sid"]
+                    self.app_ids.append(f"{app_id}")
         logger.debug(f"-- User {self.current_user} has {len(self.app_ids)} active -- {self.app_ids}")
 
     @task(5)
@@ -126,8 +174,8 @@ class UserBehaviour(TaskSet):
         if len(self.app_ids) > 0:
             r_num = self.get_random_number(len(self.app_ids))
             app_id = self.app_ids[r_num]
-            with self.client.post(
-                    "/list_pods/",
+            with self.client.delete(
+                    f"/api/v1/instances/{app_id}/",
                     name="Delete the app",
                     headers={"X-CSRFToken": self.csrf_token},
                     cookies={"sessionid": self.session_id, "csrftoken": self.csrf_token},
@@ -145,17 +193,17 @@ class UserBehaviour(TaskSet):
 
 class WebUser(HttpUser):
     tasks = [UserBehaviour]
-    wait_time = between(2, 5)
-    host = os.environ.get("HOST_NAME")
+    wait_time = between(0, 0.1)
+    host = host_under_test
 
 
 launch_times = {}
 extend = Blueprint(
     "extend",
     "extend_web_ui",
-    static_folder=f"{TEST_USERS_PATH}/static/",
+    static_folder=f"{test_users_path}/static/",
     static_url_path="/extend/static/",
-    template_folder=f"{TEST_USERS_PATH}/templates/",
+    template_folder=f"{test_users_path}/templates/",
 )
 
 
