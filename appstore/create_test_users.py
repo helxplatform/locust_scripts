@@ -13,7 +13,7 @@ def random_password():
 
 def create_users(num_of_users):
     for i in range(0, num_of_users):
-        user_name = "HelxUser" + str(i+1)
+        user_name = "HelxTestUser" + str(i+1)
         password = random_password()
         email = user_name + "@email.com"
         user_creds = (user_name, password, email)

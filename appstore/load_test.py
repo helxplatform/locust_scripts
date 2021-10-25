@@ -84,7 +84,7 @@ class UserBehaviour(TaskSet):
 
         max_tries = os.environ.get("MAX_TRIES", 500)
 
-        no_of_notebooks = os.environ.get("NOTEBOOKS_COUNT", 30)
+        no_of_notebooks = int(os.environ.get("NOTEBOOKS_COUNT", 30))
 
         if active_instances_count < int(max_instances):
             with self.client.post(f"/api/v1/instances/",
@@ -169,22 +169,22 @@ class UserBehaviour(TaskSet):
                     self.app_ids.append(f"{app_id}")
         logger.debug(f"-- User {self.current_user} has {len(self.app_ids)} active -- {self.app_ids}")
 
-#    @task(5)
-#    def delete_apps(self):
-#        if len(self.app_ids) > 0:
-#            r_num = self.get_random_number(len(self.app_ids))
-#            app_id = self.app_ids[r_num]
-#            with self.client.delete(
-#                    f"/api/v1/instances/{app_id}/",
-#                    name="Delete the app",
-#                    headers={"X-CSRFToken": self.csrf_token},
-#                    cookies={"sessionid": self.session_id, "csrftoken": self.csrf_token},
-#                    data={"id": f"{app_id}", "action": "delete"},
-#                    catch_response=True) as resp:
-#                logger.debug(f"-- App with id {app_id} has been delete by user {self.current_user}")
-#                self.app_ids.remove(app_id)
-#        else:
-#            logger.debug(f"-- No currently active applications for user {self.current_user}.")
+    @task(5)
+    def delete_apps(self):
+        if len(self.app_ids) > 0:
+            r_num = self.get_random_number(len(self.app_ids))
+            app_id = self.app_ids[r_num]
+            with self.client.delete(
+                    f"/api/v1/instances/{app_id}/",
+                    name="Delete the app",
+                    headers={"X-CSRFToken": self.csrf_token},
+                    cookies={"sessionid": self.session_id, "csrftoken": self.csrf_token},
+                    data={"id": f"{app_id}", "action": "delete"},
+                    catch_response=True) as resp:
+                logger.debug(f"-- App with id {app_id} has been delete by user {self.current_user}")
+                self.app_ids.remove(app_id)
+        else:
+            logger.debug(f"-- No currently active applications for user {self.current_user}.")
 
     def on_stop(self):
         self.client.cookies.clear()
@@ -193,7 +193,7 @@ class UserBehaviour(TaskSet):
 
 class WebUser(HttpUser):
     tasks = [UserBehaviour]
-    wait_time = between(2, 5)
+    wait_time = between(0, 0.1)
     host = host_under_test
 
 
